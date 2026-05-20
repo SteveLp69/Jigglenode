@@ -17,11 +17,11 @@ extends Node3D
 @export var gravity := Vector3(0, -9.81, 0)
 
 @export_category("Offsets / Limits")
-@export var rotation_offset: Vector3 = Vector3.ZERO
-@export_range(0, 360, 0.1, "or_greater") var max_rotation_dif: float = 45
-@export var lock_x_rot: bool = false
-@export var lock_y_rot: bool = false
-@export var lock_z_rot: bool = false
+@export var rotation_offset: Vector3
+@export_range(0, 360, 0.1, "or_greater") var max_rotation_dif: float
+@export var lock_x_rot: bool
+@export var lock_y_rot: bool
+@export var lock_z_rot: bool
 
 @export_category("Mapping's")
 @export_enum("X", "Y", "Z") var x_rotation_mappnig: int = 0
@@ -31,6 +31,8 @@ extends Node3D
 @export_category("Extras")
 ## Actevates the position sensetivaty during runtime
 @export var force_position_sensetivaty: bool
+@export var overwrite_target_rotation: bool
+@export var overwrite_target_rotation_value: Vector3
 
 var _velocity: Vector3 = Vector3.ZERO
 var _last_position: Vector3
@@ -39,30 +41,34 @@ var base_rotation: Vector3
 
 var position_target: Node3D
 
-var prev_parent_pos: Vector3 = get_parent().global_position
+var prev_parent_pos: Vector3
 
 func _ready():
+	if get_parent().is_inside_tree():
+		prev_parent_pos = get_parent().global_position
+	
 	base_rotation = target_node.rotation_degrees
 	
 	var target: Node3D = Node3D.new()
 	target_node.get_parent().add_child(target)
-	target.position = get_target_position(target_node.rotation_degrees).normalized()
+	target.position = get_target_position(target_node).normalized()
 	position_target = target
 	
 	set_physics_process(true)
 	set_process(true)
 
-func get_target_position(rotation_deg: Vector3):
-	var rotation_rad = rotation_deg * (PI / 180.0)
+func get_target_position(node: Node3D) -> Vector3:
+	var relative_basis = global_basis.inverse() * node.global_basis
+	return -relative_basis.z
+
+func get_target_direction_from_rotation(rotation_deg: Vector3, parent_basis: Basis = Basis()) -> Vector3:
+	var basis = parent_basis
 	
-	var desired_basis = Basis()
-	desired_basis = desired_basis.rotated(Vector3(1,0,0), rotation_rad.x)
-	desired_basis = desired_basis.rotated(Vector3(0,1,0), rotation_rad.y)
-	desired_basis = desired_basis.rotated(Vector3(0,0,1), rotation_rad.z)
+	#basis = basis.rotated(Vector3.RIGHT, deg_to_rad(rotation_deg.x))
+	basis = basis.rotated(Vector3.UP, deg_to_rad(rotation_deg.y))
+	basis = basis.rotated(Vector3.BACK, deg_to_rad(rotation_deg.z))
 	
-	var forward_dir = -desired_basis.z
-	
-	return forward_dir
+	return -basis.z
 
 func mapping(map_id: int, value: float) -> Vector3:
 	match map_id:
@@ -104,7 +110,14 @@ func _physics_process(delta: float) -> void:
 		if target == null:
 			return
 		
-		var target_pos = position_target.global_transform.origin
+		var target_pos: Vector3
+		if !overwrite_target_rotation:
+			target_pos = position_target.global_transform.origin
+		else:
+			target_pos = get_target_direction_from_rotation(
+				overwrite_target_rotation_value,
+				target_node.get_parent_node_3d().global_basis
+			) + target_node.global_position
 		
 		var force = (target_pos - _last_position) * stiffness
 		if use_gravity:
